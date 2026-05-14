@@ -1,0 +1,112 @@
+# Unity生成的文件夹
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# 永远不要忽略Asset meta文件
+!Assets/**/*.meta
+
+# 构建缓存
+[Aa]ssets/AssetStoreTools*
+[Aa]ssets/StreamingAssets/*.dll
+[Aa]ssets/StreamingAssets/*.pdb
+
+# Visual Studio缓存目录
+.vs/
+
+# Gradle缓存目录 (Android构建)
+.gradle/
+
+# VS/MD/Consulo解决方案和项目文件
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Unity3D生成的meta文件
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Unity3D生成的文件错误
+*.stackdump
+
+# Unity编辑器崩溃报告
+sysinfo.txt
+
+# Builds构建输出
+*.apk
+*.unitypackage
+*.aab
+
+# Crashlytics生成的文件
+crashlytics-build.properties
+
+# Packed Addressables资源
+[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+
+# 临时自动保存文件
+[Aa]ssets/Scenes/*.tmp
+
+# Fmod缓存
+fmod_editor.log
+
+# 系统文件 (macOS)
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows系统文件
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE文件
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# 可执行文件
+*.exe
+*.x86
+*.x86_64
+*.app
+
+# 构建文件夹
+[Bb]uild/WebGL/
+[Bb]uild/Android/
+[Bb]uild/iOS/
+[Bb]uild/StandaloneWindows/
+[Bb]uild/StandaloneWindows64/
+[Bb]uild/StandaloneOSX/
+[Bb]uild/StandaloneLinux/
+[Bb]uild/StandaloneLinux64/
+
+# 包管理器 - 保留配置文件，忽略缓存
+[Pp]ackages/*
+![Pp]ackages/manifest.json
+![Pp]ackages/packages-lock.json
+
+# 其他项目/本地参考，不纳入本仓库
+_external/
