@@ -2,7 +2,8 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// Orthographic 2D camera: smooth follow (SmoothDamp), optional map-edge clamp, +/- zoom.
+/// Orthographic camera: SmoothDamp follow, map-edge clamp.
+/// Zoom: Ctrl + scroll wheel, or UI +/- buttons (no keyboard +/-).
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Camera))]
@@ -10,174 +11,153 @@ public sealed class StardewStyleCamera2D : MonoBehaviour
 {
     [Header("Follow")]
     [SerializeField] private Transform target;
+    [SerializeField] private bool autoFindPlayerOnStart = true;
     [SerializeField] private Vector3 followOffset = new Vector3(0f, 0f, -10f);
     [SerializeField] private float smoothTime = 0.15f;
 
     [Header("Orthographic zoom")]
-    [Tooltip("Smaller value = closer / more zoomed in.")]
-    [SerializeField] private float minOrthographicSize = 3f;
-    [Tooltip("Larger value = farther / more zoomed out.")]
-    [SerializeField] private float maxOrthographicSize = 12f;
-    [SerializeField] private float zoomStep = 0.35f;
+    [SerializeField] private float minOrthographicSize = 4f;
+    [SerializeField] private float maxOrthographicSize = 14f;
+    [SerializeField] private float zoomStep = 0.5f;
+    [SerializeField] private float scrollZoomSpeed = 0.8f;
 
     [Header("Bounds")]
-    [Tooltip("If set, camera center is clamped so the orthographic view stays inside this collider's world bounds.")]
     [SerializeField] private Collider2D mapBoundsCollider;
-
     [SerializeField] private bool useManualCenterBounds;
-    [SerializeField] private Vector2 manualCenterMin = new Vector2(-15f, -10f);
-    [SerializeField] private Vector2 manualCenterMax = new Vector2(15f, 10f);
-
-    [Header("Input")]
-    [SerializeField] private bool usePlayerInputAsset = true;
+    [SerializeField] private Vector2 manualCenterMin = new Vector2(-8f, -6f);
+    [SerializeField] private Vector2 manualCenterMax = new Vector2(8f, 6f);
 
     private Camera cam;
-    private Vector3 dampVelocity;
-    private PlayerInput playerInput;
+    private Vector3 smoothVelocity;
+
+    public Transform Target
+    {
+        get => target;
+        set => target = value;
+    }
+
+    public Collider2D MapBoundsCollider
+    {
+        get => mapBoundsCollider;
+        set => mapBoundsCollider = value;
+    }
 
     private void Awake()
     {
         cam = GetComponent<Camera>();
-        if (!cam.orthographic)
-            cam.orthographic = true;
-
-        minOrthographicSize = Mathf.Max(0.01f, minOrthographicSize);
-        maxOrthographicSize = Mathf.Max(minOrthographicSize, maxOrthographicSize);
-        cam.orthographicSize = Mathf.Clamp(cam.orthographicSize, minOrthographicSize, maxOrthographicSize);
-
-        if (usePlayerInputAsset)
-            playerInput = new PlayerInput();
+        cam.orthographic = true;
     }
 
-    private void OnEnable()
+    private void Start()
     {
-        if (playerInput == null) return;
-
-        playerInput.Default.Enable();
-        playerInput.Default.ZoomIn.performed += OnZoomInPerformed;
-        playerInput.Default.ZoomOut.performed += OnZoomOutPerformed;
-    }
-
-    private void OnDisable()
-    {
-        if (playerInput == null) return;
-
-        playerInput.Default.ZoomIn.performed -= OnZoomInPerformed;
-        playerInput.Default.ZoomOut.performed -= OnZoomOutPerformed;
-        playerInput.Default.Disable();
-    }
-
-    private void OnDestroy()
-    {
-        if (playerInput != null)
+        if (target == null && autoFindPlayerOnStart)
         {
-            playerInput.Dispose();
-            playerInput = null;
+            var player = GameObject.Find("Player");
+            if (player != null)
+                target = player.transform;
         }
-    }
 
-    private void OnZoomInPerformed(InputAction.CallbackContext _) => ZoomIn();
-
-    private void OnZoomOutPerformed(InputAction.CallbackContext _) => ZoomOut();
-
-    /// <summary>UI / script: zoom in (smaller orthographic size).</summary>
-    public void ZoomIn()
-    {
-        if (cam == null) return;
-        cam.orthographicSize = Mathf.Clamp(
-            cam.orthographicSize - zoomStep,
-            minOrthographicSize,
-            maxOrthographicSize);
-    }
-
-    /// <summary>UI / script: zoom out (larger orthographic size).</summary>
-    public void ZoomOut()
-    {
-        if (cam == null) return;
-        cam.orthographicSize = Mathf.Clamp(
-            cam.orthographicSize + zoomStep,
-            minOrthographicSize,
-            maxOrthographicSize);
+        if (mapBoundsCollider == null)
+        {
+            var bounds = GameObject.Find("MapBounds");
+            if (bounds != null)
+                mapBoundsCollider = bounds.GetComponent<Collider2D>();
+        }
     }
 
     private void Update()
     {
-        if (usePlayerInputAsset) return;
-
-        Keyboard kb = Keyboard.current;
-        if (kb == null) return;
-
-        if (kb.numpadPlusKey.wasPressedThisFrame || kb.equalsKey.wasPressedThisFrame)
-            ZoomIn();
-        if (kb.numpadMinusKey.wasPressedThisFrame || kb.minusKey.wasPressedThisFrame)
-            ZoomOut();
+        HandleCtrlScrollZoom();
     }
 
     private void LateUpdate()
     {
-        if (target == null || cam == null) return;
+        if (target == null)
+            return;
 
         Vector3 desired = target.position + followOffset;
-        desired.z = transform.position.z;
+        Vector3 smoothed = Vector3.SmoothDamp(transform.position, desired, ref smoothVelocity, smoothTime);
+        smoothed.z = followOffset.z;
 
-        desired = ClampCameraCenter(desired);
-        transform.position = Vector3.SmoothDamp(transform.position, desired, ref dampVelocity, Mathf.Max(0.0001f, smoothTime));
-        transform.position = ClampCameraCenter(transform.position);
+        Vector2 center = new Vector2(smoothed.x, smoothed.y);
+        center = ClampCenter(center);
+        transform.position = new Vector3(center.x, center.y, followOffset.z);
     }
 
-    private Vector3 ClampCameraCenter(Vector3 center)
+    /// <summary>Called by UI "+" button — zoom in (closer).</summary>
+    public void ZoomIn()
     {
-        if (!TryGetWorldBounds(out Bounds b))
+        cam.orthographicSize = Mathf.Max(minOrthographicSize, cam.orthographicSize - zoomStep);
+    }
+
+    /// <summary>Called by UI "-" button — zoom out (farther).</summary>
+    public void ZoomOut()
+    {
+        cam.orthographicSize = Mathf.Min(maxOrthographicSize, cam.orthographicSize + zoomStep);
+    }
+
+    private void HandleCtrlScrollZoom()
+    {
+        if (!IsCtrlHeld())
+            return;
+
+        float scroll = 0f;
+        if (Mouse.current != null)
+            scroll = Mouse.current.scroll.ReadValue().y;
+
+        if (Mathf.Abs(scroll) < 0.01f)
+            return;
+
+        float next = cam.orthographicSize - scroll * scrollZoomSpeed * 0.01f;
+        cam.orthographicSize = Mathf.Clamp(next, minOrthographicSize, maxOrthographicSize);
+    }
+
+    private static bool IsCtrlHeld()
+    {
+        if (Keyboard.current != null)
+        {
+            return Keyboard.current.leftCtrlKey.isPressed
+                   || Keyboard.current.rightCtrlKey.isPressed;
+        }
+
+        return Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+    }
+
+    private Vector2 ClampCenter(Vector2 center)
+    {
+        float halfH = cam.orthographicSize;
+        float halfW = halfH * cam.aspect;
+
+        if (useManualCenterBounds)
+            return ClampCenterToRect(center, manualCenterMin, manualCenterMax, halfW, halfH);
+
+        if (mapBoundsCollider == null)
             return center;
 
-        float halfHeight = cam.orthographicSize;
-        float halfWidth = halfHeight * cam.aspect;
+        Bounds b = mapBoundsCollider.bounds;
+        Vector2 min = new Vector2(b.min.x + halfW, b.min.y + halfH);
+        Vector2 max = new Vector2(b.max.x - halfW, b.max.y - halfH);
 
-        float minCenterX = b.min.x + halfWidth;
-        float maxCenterX = b.max.x - halfWidth;
-        float minCenterY = b.min.y + halfHeight;
-        float maxCenterY = b.max.y - halfHeight;
+        if (min.x <= max.x)
+            center.x = Mathf.Clamp(center.x, min.x, max.x);
 
-        if (minCenterX > maxCenterX)
-        {
-            float mid = (b.min.x + b.max.x) * 0.5f;
-            minCenterX = maxCenterX = mid;
-        }
+        if (min.y <= max.y)
+            center.y = Mathf.Clamp(center.y, min.y, max.y);
 
-        if (minCenterY > maxCenterY)
-        {
-            float mid = (b.min.y + b.max.y) * 0.5f;
-            minCenterY = maxCenterY = mid;
-        }
-
-        center.x = Mathf.Clamp(center.x, minCenterX, maxCenterX);
-        center.y = Mathf.Clamp(center.y, minCenterY, maxCenterY);
         return center;
     }
 
-    private bool TryGetWorldBounds(out Bounds bounds)
+    private static Vector2 ClampCenterToRect(Vector2 center, Vector2 rectMin, Vector2 rectMax, float halfW, float halfH)
     {
-        if (mapBoundsCollider != null)
-        {
-            bounds = mapBoundsCollider.bounds;
-            return true;
-        }
+        Vector2 min = new Vector2(rectMin.x + halfW, rectMin.y + halfH);
+        Vector2 max = new Vector2(rectMax.x - halfW, rectMax.y - halfH);
 
-        if (useManualCenterBounds)
-        {
-            Vector3 min = new Vector3(manualCenterMin.x, manualCenterMin.y, 0f);
-            Vector3 max = new Vector3(manualCenterMax.x, manualCenterMax.y, 0f);
-            bounds = new Bounds((min + max) * 0.5f, max - min);
-            return true;
-        }
+        if (min.x <= max.x)
+            center.x = Mathf.Clamp(center.x, min.x, max.x);
 
-        bounds = default;
-        return false;
-    }
+        if (min.y <= max.y)
+            center.y = Mathf.Clamp(center.y, min.y, max.y);
 
-    private void OnValidate()
-    {
-        minOrthographicSize = Mathf.Max(0.01f, minOrthographicSize);
-        maxOrthographicSize = Mathf.Max(minOrthographicSize, maxOrthographicSize);
+        return center;
     }
 }
