@@ -65,13 +65,33 @@ public sealed class IsometricPlayerController : MonoBehaviour
 
     private void Update()
     {
+        if (GameplayInputBlocker.IsBlocked)
+        {
+            keyboardInput = Vector2.zero;
+            UpdateClickMarker();
+            return;
+        }
+
         ReadKeyboardInput();
         ReadClickInput();
         UpdateClickMarker();
     }
 
+    private void LateUpdate()
+    {
+        // Prevent accidental scale drift; movement must not change character size.
+        if (transform.localScale != Vector3.one)
+            transform.localScale = Vector3.one;
+    }
+
     private void FixedUpdate()
     {
+        if (GameplayInputBlocker.IsBlocked)
+        {
+            EnterIdle();
+            return;
+        }
+
         if (keyboardInput.sqrMagnitude > 0.01f)
         {
             rb.velocity = keyboardInput.normalized * moveSpeed;
@@ -121,6 +141,15 @@ public sealed class IsometricPlayerController : MonoBehaviour
             if (legacy != null)
                 groundTilemap = legacy.GetComponent<Tilemap>();
         }
+    }
+
+    /// <summary>Stops movement and clears click destination (standby).</summary>
+    public void EnterIdle()
+    {
+        keyboardInput = Vector2.zero;
+        clickDestination = null;
+        if (rb != null)
+            rb.velocity = Vector2.zero;
     }
 
     private void ReadKeyboardInput()
@@ -208,7 +237,23 @@ public sealed class IsometricPlayerController : MonoBehaviour
         if (obstacleTilemap != null && obstacleTilemap.HasTile(cell))
             return false;
 
-        return groundTilemap != null && groundTilemap.HasTile(cell);
+        if (groundTilemap == null || !groundTilemap.HasTile(cell))
+            return false;
+
+        Vector3 world = groundTilemap.GetCellCenterWorld(cell);
+        return !IsBlockedByPropFootprint(world);
+    }
+
+    private static bool IsBlockedByPropFootprint(Vector3 worldPos)
+    {
+        var hits = Physics2D.OverlapCircleAll(worldPos, 0.18f);
+        foreach (var hit in hits)
+        {
+            if (hit.GetComponent<PropFootprintCollider>() != null)
+                return true;
+        }
+
+        return false;
     }
 
     private void UpdateClickMarker()

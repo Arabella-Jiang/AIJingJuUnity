@@ -4,6 +4,7 @@ using UnityEngine.Tilemaps;
 /// <summary>
 /// Isometric depth sorting: uses grid cell (x + y) so the player draws above floor tiles at the same cell.
 /// </summary>
+[ExecuteAlways]
 [DisallowMultipleComponent]
 [RequireComponent(typeof(SpriteRenderer))]
 public sealed class YSortByPosition : MonoBehaviour
@@ -37,4 +38,6 @@ public sealed class YSortByPosition : MonoBehaviour
     }
 
     public void SetGrid(Grid value) => grid = value;
+
+    public void SetCharacterBias(int value) => characterBias = value;
 }

@@ -3,14 +3,13 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.Tilemaps;
 using UnityEngine.UI;
 
 /// <summary>
 /// Menu: JingJu → Setup Isometric Demo Scene
-/// Builds Phase 0 test map (placeholder tiles), player, camera, and bounds.
+/// floor_00/01/02/06/07/08 ground, floor_01 border, vendor prefabs on top (invisible footprint colliders).
 /// </summary>
 public static class IsometricDemoSceneSetup
 {
@@ -19,15 +18,30 @@ public static class IsometricDemoSceneSetup
     private const string ObstacleTilePath = TilesFolder + "/ObstacleTile.asset";
     private const string PlayerSpritePath = TilesFolder + "/PlayerSprite.png";
 
-    private const int MapWidth = 18;
-    private const int MapHeight = 14;
+    private const string FloorTilesFolder = "Assets/Art/地砖/Tiles";
+    private const string BoundarySourceFloor = "Assets/Art/地砖/Tiles/floor_01.asset";
+    private const string BoundaryTilePath = "Assets/Art/地砖/Tiles/boundary_stone.asset";
+    private const string VendorPrefabsFolder = "Assets/Art/建筑小品/Prefabs";
+
+    // One flat ground tile only — mixing 02/06/07/08 looks like stacked 3D blocks (brush uses one tile).
+    private const string PrimaryGroundFloor = "Assets/Art/地砖/Tiles/floor_00.asset";
+
+    private const int MapWidth = 36;
+    private const int MapHeight = 28;
+    private static readonly (string prefabName, int cellX, int cellY)[] VendorSpawns =
+    {
+        ("1", 10, 7),
+        ("2", 25, 7),
+        ("3", 16, 15),
+        ("5", 10, 20),
+    };
 
     [MenuItem("JingJu/Setup Isometric Demo Scene")]
     public static void SetupDemoScene()
     {
         EnsurePlaceholderAssets();
 
-        foreach (var name in new[] { "IsometricWorld", "Grid", "Player", "MapBounds", "CameraBounds", "GameUI" })
+        foreach (var name in new[] { "IsometricWorld", "Grid", "Player", "MapBounds", "CameraBounds", "GameUI", "Props" })
         {
             var old = GameObject.Find(name);
             if (old != null)
@@ -43,12 +57,23 @@ public static class IsometricDemoSceneSetup
         grid.cellLayout = GridLayout.CellLayout.Isometric;
         grid.cellSize = new Vector3(1f, 0.5f, 1f);
 
-        var groundTile = EnsureTileAsset(GroundTilePath, new Color(0.35f, 0.62f, 0.32f, 1f));
-        var obstacleTile = EnsureTileAsset(ObstacleTilePath, new Color(0.72f, 0.28f, 0.22f, 1f));
-        if (groundTile == null || obstacleTile == null)
+        ConfigureProducerFloorImports();
+
+        var primaryGround = LoadPrimaryGroundTile();
+        var boundaryTile = EnsureBoundaryTile();
+        var useProducerArt = primaryGround != null && boundaryTile != null;
+
+        Tile placeholderGround = null;
+        Tile placeholderObstacle = null;
+        if (!useProducerArt)
         {
-            Debug.LogError("[JingJu] Failed to create placeholder tiles. See Console for import errors.");
-            return;
+            placeholderGround = EnsureTileAsset(GroundTilePath, new Color(0.35f, 0.62f, 0.32f, 1f));
+            placeholderObstacle = EnsureTileAsset(ObstacleTilePath, new Color(0.72f, 0.28f, 0.22f, 1f));
+            if (placeholderGround == null || placeholderObstacle == null)
+            {
+                Debug.LogError("[JingJu] Failed to create placeholder tiles. Run Slice 地砖 first or check Console.");
+                return;
+            }
         }
 
         var groundGo = new GameObject("Ground");
@@ -58,6 +83,12 @@ public static class IsometricDemoSceneSetup
         groundRenderer.sortingOrder = 0;
         groundRenderer.mode = TilemapRenderer.Mode.Chunk;
 
+        var decorGo = new GameObject("Decor");
+        decorGo.transform.SetParent(gridRoot.transform, false);
+        decorGo.AddComponent<Tilemap>();
+        var decorRenderer = decorGo.AddComponent<TilemapRenderer>();
+        decorRenderer.sortingOrder = 5;
+
         var obstacleGo = new GameObject("Obstacle");
         obstacleGo.transform.SetParent(gridRoot.transform, false);
         var obstacleTilemap = obstacleGo.AddComponent<Tilemap>();
@@ -65,26 +96,247 @@ public static class IsometricDemoSceneSetup
         obstacleRenderer.sortingOrder = 10;
         obstacleRenderer.mode = TilemapRenderer.Mode.Chunk;
 
-        // Order matters: Static Rigidbody2D → TilemapCollider2D → CompositeCollider2D
-        // (CompositeCollider2D may auto-add Rigidbody2D — do not AddComponent twice)
         var obstacleRb = obstacleGo.AddComponent<Rigidbody2D>();
         obstacleRb.bodyType = RigidbodyType2D.Static;
         var tilemapCollider = obstacleGo.AddComponent<TilemapCollider2D>();
         tilemapCollider.usedByComposite = true;
-        var obstacleComposite = obstacleGo.AddComponent<CompositeCollider2D>();
-        obstacleComposite.geometryType = CompositeCollider2D.GeometryType.Polygons;
+        obstacleGo.AddComponent<CompositeCollider2D>();
 
-        PaintTestMap(groundTilemap, obstacleTilemap, groundTile, obstacleTile);
+        var propsRoot = new GameObject("Props");
+        propsRoot.transform.SetParent(gridRoot.transform, false);
+
+        if (useProducerArt)
+            PaintProducerMap(groundTilemap, obstacleTilemap, primaryGround, boundaryTile);
+        else
+            PaintPlaceholderMap(groundTilemap, obstacleTilemap, placeholderGround, placeholderObstacle);
+
+        int vendors = PlaceVendorPrefabs(grid, propsRoot);
 
         var mapBounds = CreateMapBounds(grid, groundTilemap);
         var player = CreatePlayer(grid, groundTilemap, obstacleTilemap);
         var cameraFollow = SetupMainCamera(player.transform, mapBounds);
-        SetupCameraZoomUI(cameraFollow);
+        var gameUI = MainHUDUISetup.EnsureGameUICanvas();
+        MainHUDUISetup.BuildMainHUD(gameUI.transform);
+        SetupCameraZoomUI(gameUI.transform, cameraFollow);
 
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         Selection.activeGameObject = player;
 
-        Debug.Log("[JingJu] Demo ready. Move: WASD / click ground. Zoom: Ctrl+scroll or UI +/-.");
+        Debug.Log(
+            $"[JingJu] Demo ready ({(useProducerArt ? $"{MapWidth}x{MapHeight} floor_00 + border floor_01" : "placeholder tiles")}, " +
+            $"{vendors} vendor(s)). WASD / click move. Ctrl+scroll zoom.");
+    }
+
+    private static Tile LoadPrimaryGroundTile()
+    {
+        return AssetDatabase.LoadAssetAtPath<Tile>(PrimaryGroundFloor);
+    }
+
+    private static Tile EnsureBoundaryTile()
+    {
+        var source = AssetDatabase.LoadAssetAtPath<Tile>(BoundarySourceFloor);
+        if (source == null || source.sprite == null)
+            return null;
+
+        var existing = AssetDatabase.LoadAssetAtPath<Tile>(BoundaryTilePath);
+        if (existing != null)
+        {
+            existing.sprite = source.sprite;
+            existing.colliderType = Tile.ColliderType.Sprite;
+            EditorUtility.SetDirty(existing);
+            return existing;
+        }
+
+        var tile = ScriptableObject.CreateInstance<Tile>();
+        tile.sprite = source.sprite;
+        tile.colliderType = Tile.ColliderType.Sprite;
+        AssetDatabase.CreateAsset(tile, BoundaryTilePath);
+        AssetDatabase.SaveAssets();
+        return tile;
+    }
+
+    private static void PaintProducerMap(Tilemap ground, Tilemap obstacle, Tile groundTile, Tile boundaryTile)
+    {
+        ground.ClearAllTiles();
+        obstacle.ClearAllTiles();
+
+        for (int x = 0; x < MapWidth; x++)
+        {
+            for (int y = 0; y < MapHeight; y++)
+            {
+                var cell = new Vector3Int(x, y, 0);
+                bool isBorder = x == 0 || y == 0 || x == MapWidth - 1 || y == MapHeight - 1;
+
+                if (isBorder)
+                {
+                    // Border only on Obstacle — same as painting one layer with the brush.
+                    obstacle.SetTile(cell, boundaryTile);
+                    continue;
+                }
+
+                ground.SetTile(cell, groundTile);
+            }
+        }
+    }
+
+    private static void PaintPlaceholderMap(Tilemap ground, Tilemap obstacle, Tile groundTile, Tile obstacleTile)
+    {
+        ground.ClearAllTiles();
+        obstacle.ClearAllTiles();
+
+        for (int x = 0; x < MapWidth; x++)
+        {
+            for (int y = 0; y < MapHeight; y++)
+            {
+                var cell = new Vector3Int(x, y, 0);
+                bool isBorder = x == 0 || y == 0 || x == MapWidth - 1 || y == MapHeight - 1;
+
+                if (isBorder)
+                    obstacle.SetTile(cell, obstacleTile);
+                else
+                    ground.SetTile(cell, groundTile);
+            }
+        }
+    }
+
+    private static void ConfigureProducerFloorImports()
+    {
+        const string slicedFolder = "Assets/Art/地砖/Sliced";
+        if (!AssetDatabase.IsValidFolder(slicedFolder))
+            return;
+
+        foreach (string guid in AssetDatabase.FindAssets("t:Texture2D", new[] { slicedFolder }))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (path.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase))
+                ApplyFloorSpriteImport(path);
+        }
+    }
+
+    private static void ApplyFloorSpriteImport(string assetPath)
+    {
+        var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+        if (importer == null)
+            return;
+
+        if (!TryGetPngSize(assetPath, out int texWidth, out _))
+            texWidth = 184;
+
+        float ppu = Mathf.Max(texWidth, 1);
+        Vector2 pivot = ComputeIsometricPivotFromPng(assetPath, 64);
+
+        importer.textureType = TextureImporterType.Sprite;
+        importer.spriteImportMode = SpriteImportMode.Single;
+        importer.spritePixelsPerUnit = ppu;
+        importer.filterMode = FilterMode.Point;
+        importer.textureCompression = TextureImporterCompression.Uncompressed;
+        importer.alphaIsTransparency = true;
+        importer.mipmapEnabled = false;
+
+        var settings = new TextureImporterSettings();
+        importer.ReadTextureSettings(settings);
+        settings.spriteAlignment = (int)SpriteAlignment.Custom;
+        settings.spritePivot = pivot;
+        settings.spriteMeshType = SpriteMeshType.FullRect;
+        settings.spriteBorder = Vector4.zero;
+        importer.SetTextureSettings(settings);
+        importer.SaveAndReimport();
+    }
+
+    private static bool TryGetPngSize(string assetPath, out int width, out int height)
+    {
+        width = height = 0;
+        string fullPath = Path.GetFullPath(assetPath);
+        if (!File.Exists(fullPath))
+            return false;
+
+        byte[] data = File.ReadAllBytes(fullPath);
+        if (data.Length < 24 || data[0] != 137)
+            return false;
+
+        width = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
+        height = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
+        return width > 0 && height > 0;
+    }
+
+    private static Vector2 ComputeIsometricPivotFromPng(string assetPath, int gridPixels)
+    {
+        string fullPath = Path.GetFullPath(assetPath);
+        if (!File.Exists(fullPath))
+            return new Vector2(0.5f, 0.85f);
+
+        byte[] bytes = File.ReadAllBytes(fullPath);
+        var temp = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        if (!temp.LoadImage(bytes))
+        {
+            Object.DestroyImmediate(temp);
+            return new Vector2(0.5f, 0.85f);
+        }
+
+        int w = temp.width;
+        int h = temp.height;
+        int yStart = h / 2;
+        int bestDist = int.MaxValue;
+        int bestY = h - 1;
+        float bestCx = w * 0.5f;
+
+        for (int y = yStart; y < h; y++)
+        {
+            int minX = w;
+            int maxX = -1;
+            for (int x = 0; x < w; x++)
+            {
+                if (temp.GetPixel(x, y).a <= 0.08f)
+                    continue;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+            }
+
+            if (maxX < minX)
+                continue;
+
+            int rowWidth = maxX - minX + 1;
+            int dist = Mathf.Abs(rowWidth - gridPixels);
+            if (dist < bestDist || (dist == bestDist && y > bestY))
+            {
+                bestDist = dist;
+                bestY = y;
+                bestCx = (minX + maxX + 1) * 0.5f;
+            }
+        }
+
+        Object.DestroyImmediate(temp);
+        return new Vector2(bestCx / w, (bestY + 0.5f) / h);
+    }
+
+    private static int PlaceVendorPrefabs(Grid grid, GameObject propsRoot)
+    {
+        if (!AssetDatabase.IsValidFolder(VendorPrefabsFolder))
+            return 0;
+
+        int placed = 0;
+        foreach (var spawn in VendorSpawns)
+        {
+            string prefabPath = $"{VendorPrefabsFolder}/{spawn.prefabName}.prefab";
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (prefab == null)
+                continue;
+
+            var cell = new Vector3Int(spawn.cellX, spawn.cellY, 0);
+            if (cell.x <= 0 || cell.y <= 0 || cell.x >= MapWidth - 1 || cell.y >= MapHeight - 1)
+                continue;
+
+            var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, propsRoot.transform);
+            instance.transform.position = grid.GetCellCenterWorld(cell);
+
+            var ySort = instance.GetComponent<YSortByPosition>();
+            if (ySort != null)
+                ySort.SetGrid(grid);
+
+            placed++;
+        }
+
+        return placed;
     }
 
     private static void EnsurePlaceholderAssets()
@@ -113,9 +365,6 @@ public static class IsometricDemoSceneSetup
         AssetDatabase.Refresh();
     }
 
-    /// <summary>
-    /// Creates or repairs a Tile when .asset / .png is missing or the sprite reference is broken.
-    /// </summary>
     private static Tile EnsureTileAsset(string assetPath, Color color)
     {
         string pngPath = assetPath.Replace(".asset", ".png");
@@ -173,6 +422,7 @@ public static class IsometricDemoSceneSetup
 
         var tile = ScriptableObject.CreateInstance<Tile>();
         tile.sprite = sprite;
+        tile.colliderType = Tile.ColliderType.Sprite;
         AssetDatabase.CreateAsset(tile, path);
     }
 
@@ -217,30 +467,6 @@ public static class IsometricDemoSceneSetup
         tex.Apply();
         tex.filterMode = FilterMode.Point;
         return tex;
-    }
-
-    private static void PaintTestMap(Tilemap ground, Tilemap obstacle, Tile groundTile, Tile obstacleTile)
-    {
-        ground.ClearAllTiles();
-        obstacle.ClearAllTiles();
-
-        for (int x = 0; x < MapWidth; x++)
-        {
-            for (int y = 0; y < MapHeight; y++)
-            {
-                var cell = new Vector3Int(x, y, 0);
-                bool isBorder = x == 0 || y == 0 || x == MapWidth - 1 || y == MapHeight - 1;
-
-                // Phase 0 demo: only visible outer walls (no hidden inner blockers).
-                if (isBorder)
-                {
-                    obstacle.SetTile(cell, obstacleTile);
-                    continue;
-                }
-
-                ground.SetTile(cell, groundTile);
-            }
-        }
     }
 
     private static GameObject CreateMapBounds(Grid grid, Tilemap groundTilemap)
@@ -293,7 +519,7 @@ public static class IsometricDemoSceneSetup
         controller.GroundTilemap = ground;
         controller.ObstacleTilemap = obstacle;
 
-        var spawnCell = new Vector3Int(MapWidth / 2, MapHeight / 2, 0);
+        var spawnCell = new Vector3Int(MapWidth / 2, MapHeight / 2 - 2, 0);
         player.transform.position = ground.GetCellCenterWorld(spawnCell);
 
         return player;
@@ -310,7 +536,7 @@ public static class IsometricDemoSceneSetup
         if (cam == null)
             cam = camGo.AddComponent<Camera>();
         cam.orthographic = true;
-        cam.orthographicSize = 7f;
+        cam.orthographicSize = 11f;
         cam.backgroundColor = new Color(0.15f, 0.18f, 0.22f);
         cam.transparencySortMode = TransparencySortMode.CustomAxis;
         cam.transparencySortAxis = new Vector3(0f, 1f, 0f);
@@ -328,92 +554,165 @@ public static class IsometricDemoSceneSetup
 
         follow.Target = target;
         follow.MapBoundsCollider = mapBounds.GetComponent<Collider2D>();
+        follow.AllowCtrlScrollZoom = false;
 
         camGo.transform.position = target.position + new Vector3(0f, 0f, -10f);
         return follow;
     }
 
-    private static void SetupCameraZoomUI(StardewStyleCamera2D cameraFollow)
+    private static void SetupCameraZoomUI(Transform canvasRoot, StardewStyleCamera2D cameraFollow)
     {
-        var uiRoot = new GameObject("GameUI");
-        var canvas = uiRoot.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-
-        var scaler = uiRoot.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920f, 1080f);
-        scaler.matchWidthOrHeight = 0.5f;
-
-        uiRoot.AddComponent<GraphicRaycaster>();
-
-        if (Object.FindObjectOfType<EventSystem>() == null)
-        {
-            var es = new GameObject("EventSystem");
-            es.AddComponent<EventSystem>();
-            es.AddComponent<StandaloneInputModule>();
-        }
+        var oldZoom = canvasRoot.Find("CameraZoomPanel");
+        if (oldZoom != null)
+            Object.DestroyImmediate(oldZoom.gameObject);
 
         var panel = new GameObject("CameraZoomPanel");
-        panel.transform.SetParent(uiRoot.transform, false);
+        panel.transform.SetParent(canvasRoot, false);
         var panelRect = panel.AddComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(1f, 0f);
         panelRect.anchorMax = new Vector2(1f, 0f);
         panelRect.pivot = new Vector2(1f, 0f);
-        panelRect.anchoredPosition = new Vector2(-24f, 24f);
-        panelRect.sizeDelta = new Vector2(120f, 112f);
+        panelRect.anchoredPosition = new Vector2(-20f, 20f);
+        panelRect.sizeDelta = new Vector2(300f, 52f);
 
-        var layout = panel.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 8f;
-        layout.childAlignment = TextAnchor.MiddleCenter;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = true;
-        layout.childForceExpandHeight = true;
+        var row = panel.AddComponent<HorizontalLayoutGroup>();
+        row.spacing = 10f;
+        row.padding = new RectOffset(6, 6, 6, 6);
+        row.childAlignment = TextAnchor.MiddleCenter;
+        row.childControlWidth = false;
+        row.childControlHeight = true;
+        row.childForceExpandWidth = false;
+        row.childForceExpandHeight = true;
 
         var zoomUi = panel.AddComponent<CameraZoomUI>();
 
-        var zoomInBtn = CreateZoomButton(panel.transform, "+");
-        var zoomOutBtn = CreateZoomButton(panel.transform, "-");
+        var zoomOutBtn = CreateZoomButton(panel.transform, "-", 44f);
+        var slider = CreateZoomSlider(panel.transform);
+        var zoomInBtn = CreateZoomButton(panel.transform, "+", 44f);
 
         UnityEditor.Events.UnityEventTools.AddPersistentListener(
-            zoomInBtn.onClick, zoomUi.OnZoomInClicked);
-        UnityEditor.Events.UnityEventTools.AddPersistentListener(
             zoomOutBtn.onClick, zoomUi.OnZoomOutClicked);
+        UnityEditor.Events.UnityEventTools.AddPersistentListener(
+            zoomInBtn.onClick, zoomUi.OnZoomInClicked);
+
+        var layoutElement = slider.gameObject.AddComponent<LayoutElement>();
+        layoutElement.flexibleWidth = 1f;
+        layoutElement.minWidth = 160f;
+        layoutElement.preferredHeight = 28f;
 
         var zoomUiSo = new SerializedObject(zoomUi);
         zoomUiSo.FindProperty("cameraController").objectReferenceValue = cameraFollow;
+        zoomUiSo.FindProperty("zoomSlider").objectReferenceValue = slider;
         zoomUiSo.ApplyModifiedPropertiesWithoutUndo();
     }
 
-    private static Button CreateZoomButton(Transform parent, string label)
+    private static Button CreateZoomButton(Transform parent, string label, float size)
     {
         var go = new GameObject($"Btn_{label}");
         go.transform.SetParent(parent, false);
 
         var rect = go.AddComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(96f, 48f);
+        rect.sizeDelta = new Vector2(size, size);
+
+        var le = go.AddComponent<LayoutElement>();
+        le.preferredWidth = size;
+        le.preferredHeight = size;
 
         var image = go.AddComponent<Image>();
-        image.color = new Color(0.12f, 0.14f, 0.18f, 0.85f);
+        image.color = new Color(0.12f, 0.14f, 0.18f, 0.88f);
 
         var btn = go.AddComponent<Button>();
+        AddButtonLabel(go.transform, label, 26);
 
+        return btn;
+    }
+
+    private static Slider CreateZoomSlider(Transform parent)
+    {
+        var root = new GameObject("ZoomSlider");
+        root.transform.SetParent(parent, false);
+
+        var rootRect = root.AddComponent<RectTransform>();
+        rootRect.sizeDelta = new Vector2(180f, 28f);
+
+        var bgGo = new GameObject("Background");
+        bgGo.transform.SetParent(root.transform, false);
+        var bgRect = bgGo.AddComponent<RectTransform>();
+        StretchRect(bgRect);
+        var bgImg = bgGo.AddComponent<Image>();
+        bgImg.color = new Color(0.1f, 0.11f, 0.14f, 0.9f);
+
+        var fillArea = new GameObject("Fill Area");
+        fillArea.transform.SetParent(root.transform, false);
+        var fillAreaRect = fillArea.AddComponent<RectTransform>();
+        fillAreaRect.anchorMin = new Vector2(0f, 0.25f);
+        fillAreaRect.anchorMax = new Vector2(1f, 0.75f);
+        fillAreaRect.offsetMin = new Vector2(8f, 0f);
+        fillAreaRect.offsetMax = new Vector2(-8f, 0f);
+
+        var fill = new GameObject("Fill");
+        fill.transform.SetParent(fillArea.transform, false);
+        var fillRect = fill.AddComponent<RectTransform>();
+        StretchRect(fillRect);
+        var fillImg = fill.AddComponent<Image>();
+        fillImg.color = new Color(0.75f, 0.68f, 0.45f, 0.95f);
+
+        var handleArea = new GameObject("Handle Slide Area");
+        handleArea.transform.SetParent(root.transform, false);
+        var handleAreaRect = handleArea.AddComponent<RectTransform>();
+        StretchRect(handleAreaRect);
+
+        var handle = new GameObject("Handle");
+        handle.transform.SetParent(handleArea.transform, false);
+        var handleRect = handle.AddComponent<RectTransform>();
+        handleRect.sizeDelta = new Vector2(18f, 28f);
+        var handleImg = handle.AddComponent<Image>();
+        handleImg.color = new Color(0.95f, 0.93f, 0.88f, 1f);
+
+        var slider = root.AddComponent<Slider>();
+        slider.fillRect = fillRect;
+        slider.handleRect = handleRect;
+        slider.targetGraphic = handleImg;
+        slider.direction = Slider.Direction.LeftToRight;
+        slider.minValue = 0f;
+        slider.maxValue = 1f;
+        slider.wholeNumbers = false;
+        slider.value = 0.5f;
+
+        return slider;
+    }
+
+    private static void StretchRect(RectTransform rect)
+    {
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+    }
+
+    public static StardewStyleCamera2D SetupMainCameraPublic(Transform target, GameObject mapBounds)
+    {
+        return SetupMainCamera(target, mapBounds);
+    }
+
+    public static void SetupCameraZoomUIPublic(Transform canvasRoot, StardewStyleCamera2D cameraFollow)
+    {
+        SetupCameraZoomUI(canvasRoot, cameraFollow);
+    }
+
+    private static void AddButtonLabel(Transform parent, string label, int fontSize)
+    {
         var textGo = new GameObject("Text");
-        textGo.transform.SetParent(go.transform, false);
+        textGo.transform.SetParent(parent, false);
         var textRect = textGo.AddComponent<RectTransform>();
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = Vector2.zero;
-        textRect.offsetMax = Vector2.zero;
+        StretchRect(textRect);
 
         var text = textGo.AddComponent<Text>();
         text.text = label;
         text.alignment = TextAnchor.MiddleCenter;
-        text.fontSize = 28;
+        text.fontSize = fontSize;
         text.color = Color.white;
         text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-
-        return btn;
     }
 }
 #endif

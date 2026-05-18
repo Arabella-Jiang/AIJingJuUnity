@@ -1,9 +1,10 @@
+using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
 /// Orthographic camera: SmoothDamp follow, map-edge clamp.
-/// Zoom: Ctrl + scroll wheel, or UI +/- buttons (no keyboard +/-).
+/// Zoom: Ctrl + scroll wheel, or UI slider with +/- (no keyboard +/-).
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Camera))]
@@ -20,6 +21,8 @@ public sealed class StardewStyleCamera2D : MonoBehaviour
     [SerializeField] private float maxOrthographicSize = 14f;
     [SerializeField] private float zoomStep = 0.5f;
     [SerializeField] private float scrollZoomSpeed = 0.8f;
+    [Tooltip("Off = zoom only via HUD +/- and slider (avoids trackpad scroll while moving).")]
+    [SerializeField] private bool allowCtrlScrollZoom = true;
 
     [Header("Bounds")]
     [SerializeField] private Collider2D mapBoundsCollider;
@@ -29,6 +32,20 @@ public sealed class StardewStyleCamera2D : MonoBehaviour
 
     private Camera cam;
     private Vector3 smoothVelocity;
+
+    public float MinOrthographicSize => minOrthographicSize;
+    public float MaxOrthographicSize => maxOrthographicSize;
+    public float CurrentOrthographicSize
+    {
+        get
+        {
+            EnsureCamera();
+            return cam != null ? cam.orthographicSize : minOrthographicSize;
+        }
+    }
+
+    /// <summary>Fired when orthographic size changes (UI slider sync).</summary>
+    public event Action ZoomChanged;
 
     public Transform Target
     {
@@ -42,10 +59,23 @@ public sealed class StardewStyleCamera2D : MonoBehaviour
         set => mapBoundsCollider = value;
     }
 
+    public bool AllowCtrlScrollZoom
+    {
+        get => allowCtrlScrollZoom;
+        set => allowCtrlScrollZoom = value;
+    }
+
     private void Awake()
     {
-        cam = GetComponent<Camera>();
-        cam.orthographic = true;
+        EnsureCamera();
+        if (cam != null)
+            cam.orthographic = true;
+    }
+
+    private void EnsureCamera()
+    {
+        if (cam == null)
+            cam = GetComponent<Camera>();
     }
 
     private void Start()
@@ -63,16 +93,26 @@ public sealed class StardewStyleCamera2D : MonoBehaviour
             if (bounds != null)
                 mapBoundsCollider = bounds.GetComponent<Collider2D>();
         }
+
+        NotifyZoomChanged();
     }
 
     private void Update()
     {
+        EnsureCamera();
+        if (cam == null)
+            return;
+
+        float before = cam.orthographicSize;
         HandleCtrlScrollZoom();
+        if (!Mathf.Approximately(before, cam.orthographicSize))
+            NotifyZoomChanged();
     }
 
     private void LateUpdate()
     {
-        if (target == null)
+        EnsureCamera();
+        if (target == null || cam == null)
             return;
 
         Vector3 desired = target.position + followOffset;
@@ -84,21 +124,53 @@ public sealed class StardewStyleCamera2D : MonoBehaviour
         transform.position = new Vector3(center.x, center.y, followOffset.z);
     }
 
-    /// <summary>Called by UI "+" button — zoom in (closer).</summary>
-    public void ZoomIn()
+    /// <summary>UI slider: 0 = zoomed out (far), 1 = zoomed in (close).</summary>
+    public void SetZoomSliderValue(float slider01)
     {
-        cam.orthographicSize = Mathf.Max(minOrthographicSize, cam.orthographicSize - zoomStep);
+        float size = Mathf.Lerp(maxOrthographicSize, minOrthographicSize, Mathf.Clamp01(slider01));
+        ApplyOrthographicSize(size);
     }
 
-    /// <summary>Called by UI "-" button — zoom out (farther).</summary>
+    public float GetZoomSliderValue()
+    {
+        EnsureCamera();
+        if (cam == null)
+            return 0.5f;
+
+        return Mathf.InverseLerp(maxOrthographicSize, minOrthographicSize, cam.orthographicSize);
+    }
+
+    /// <summary>UI "-" — zoom out (farther).</summary>
     public void ZoomOut()
     {
-        cam.orthographicSize = Mathf.Min(maxOrthographicSize, cam.orthographicSize + zoomStep);
+        ApplyOrthographicSize(cam.orthographicSize + zoomStep);
     }
+
+    /// <summary>UI "+" — zoom in (closer).</summary>
+    public void ZoomIn()
+    {
+        ApplyOrthographicSize(cam.orthographicSize - zoomStep);
+    }
+
+    private void ApplyOrthographicSize(float size)
+    {
+        EnsureCamera();
+        if (cam == null)
+            return;
+
+        float clamped = Mathf.Clamp(size, minOrthographicSize, maxOrthographicSize);
+        if (Mathf.Approximately(cam.orthographicSize, clamped))
+            return;
+
+        cam.orthographicSize = clamped;
+        NotifyZoomChanged();
+    }
+
+    private void NotifyZoomChanged() => ZoomChanged?.Invoke();
 
     private void HandleCtrlScrollZoom()
     {
-        if (!IsCtrlHeld())
+        if (!allowCtrlScrollZoom || !IsCtrlHeld())
             return;
 
         float scroll = 0f;
@@ -109,7 +181,7 @@ public sealed class StardewStyleCamera2D : MonoBehaviour
             return;
 
         float next = cam.orthographicSize - scroll * scrollZoomSpeed * 0.01f;
-        cam.orthographicSize = Mathf.Clamp(next, minOrthographicSize, maxOrthographicSize);
+        ApplyOrthographicSize(next);
     }
 
     private static bool IsCtrlHeld()
