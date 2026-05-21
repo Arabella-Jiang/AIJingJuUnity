@@ -310,24 +310,27 @@ public static class TownTileImporter
             Object.DestroyImmediate(existing);
 
         var player = new GameObject("Player");
-        var sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/PlaceholderTiles/PlayerSprite.png");
-        if (sprite != null)
+        if (!Character0PlayerSetup.TryApply(player, grid, ground, obstacle))
         {
-            var sr = player.AddComponent<SpriteRenderer>();
-            sr.sprite = sprite;
-            sr.sortingOrder = 200;
+            var sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/PlaceholderTiles/PlayerSprite.png");
+            if (sprite != null)
+            {
+                var sr = player.AddComponent<SpriteRenderer>();
+                sr.sprite = sprite;
+                sr.sortingOrder = 200;
+            }
+
+            var rb = player.AddComponent<Rigidbody2D>();
+            rb.gravityScale = 0f;
+            rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+
+            player.AddComponent<CircleCollider2D>().radius = 0.2f;
+            player.AddComponent<YSortByPosition>().SetGrid(grid);
+
+            var controller = player.AddComponent<IsometricPlayerController>();
+            controller.GroundTilemap = ground;
+            controller.ObstacleTilemap = obstacle;
         }
-
-        var rb = player.AddComponent<Rigidbody2D>();
-        rb.gravityScale = 0f;
-        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-
-        player.AddComponent<CircleCollider2D>().radius = 0.2f;
-        player.AddComponent<YSortByPosition>().SetGrid(grid);
-
-        var controller = player.AddComponent<IsometricPlayerController>();
-        controller.GroundTilemap = ground;
-        controller.ObstacleTilemap = obstacle;
 
         var spawn = new Vector3Int(MapWidth / 2, MapHeight / 2 - 1, 0);
         player.transform.position = ground.GetCellCenterWorld(spawn);

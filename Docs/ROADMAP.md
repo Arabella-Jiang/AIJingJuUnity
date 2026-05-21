@@ -82,10 +82,11 @@
 ## 快速开始（程序）
 
 1. 打开 Unity，打开 `Assets/Scenes/SampleScene.unity`
-2. 菜单 **JingJu → Setup Isometric Demo Scene**（地图 + 玩家 + 主界面 HUD + 相机缩放 UI）
-3. 使用 Producer 城镇贴图：**JingJu → Setup Town Map (Producer Tiles)**
-4. 仅刷新 HUD：**JingJu → Setup Main HUD UI**
-4. Play：**WASD** 移动 · **鼠标左键** 点击行走 · **Ctrl+滚轮** 或右下角 **- [滑动条] +** 缩放相机
+2. 菜单 **JingJu → Import Character0 Sprites**（切片 `Assets/Character0` 免费人物素材，生成精灵库）
+3. 菜单 **JingJu → Setup Isometric Demo Scene**（地图 + Character0 玩家 + 主界面 HUD + 相机缩放 UI）
+4. 使用 Producer 城镇贴图：**JingJu → Setup Town Map (Producer Tiles)**
+5. 仅刷新 HUD：**JingJu → Setup Main HUD UI**
+6. Play：**WASD** 移动 · **鼠标左键** 点击行走 · **Ctrl+滚轮** 或右下角 **- [滑动条] +** 缩放相机
 
 > 若相机不跟随：菜单再执行一次 **Setup Isometric Demo Scene**，并确认 Main Camera 上有 `StardewStyleCamera2D`，Target 指向 Player。
 
@@ -96,8 +97,10 @@
 | 脚本 | 职责 |
 |------|------|
 | `IsometricPlayerController` | 键盘 + 点击移动 |
+| `Character0Visual` | Character0 待机 / 行走 / 奔跑动画（5 方向行） |
 | `StardewStyleCamera2D` | 跟随、边界、缩放 |
 | `YSortByPosition` | 2.5D 按 Y 排序 |
+| `Editor/Character0Importer` | 切片 Character0 素材并生成 `Character0SpriteLibrary` |
 | `Editor/IsometricDemoSceneSetup` | 一键搭建 Phase 0–3 场景 |
 | `Editor/MainHUDUISetup` | 主界面 HUD 占位布局（64px 网格） |
 | `MainHUDLayout` | HUD 根节点标记 |

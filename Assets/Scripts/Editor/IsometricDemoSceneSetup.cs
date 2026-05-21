@@ -498,26 +498,29 @@ public static class IsometricDemoSceneSetup
 
         var player = new GameObject("Player");
 
-        var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(PlayerSpritePath);
-        var sr = player.AddComponent<SpriteRenderer>();
-        sr.sprite = sprite;
-        sr.sortingLayerName = "Default";
-        sr.sortingOrder = 200;
+        if (!Character0PlayerSetup.TryApply(player, grid, ground, obstacle))
+        {
+            var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(PlayerSpritePath);
+            var sr = player.AddComponent<SpriteRenderer>();
+            sr.sprite = sprite;
+            sr.sortingLayerName = "Default";
+            sr.sortingOrder = 200;
 
-        var rb = player.AddComponent<Rigidbody2D>();
-        rb.gravityScale = 0f;
-        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+            var rb = player.AddComponent<Rigidbody2D>();
+            rb.gravityScale = 0f;
+            rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+            rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
-        var col = player.AddComponent<CircleCollider2D>();
-        col.radius = 0.2f;
+            var col = player.AddComponent<CircleCollider2D>();
+            col.radius = 0.2f;
 
-        var ySort = player.AddComponent<YSortByPosition>();
-        ySort.SetGrid(grid);
+            var ySort = player.AddComponent<YSortByPosition>();
+            ySort.SetGrid(grid);
 
-        var controller = player.AddComponent<IsometricPlayerController>();
-        controller.GroundTilemap = ground;
-        controller.ObstacleTilemap = obstacle;
+            var controller = player.AddComponent<IsometricPlayerController>();
+            controller.GroundTilemap = ground;
+            controller.ObstacleTilemap = obstacle;
+        }
 
         var spawnCell = new Vector3Int(MapWidth / 2, MapHeight / 2 - 2, 0);
         player.transform.position = ground.GetCellCenterWorld(spawnCell);
@@ -622,6 +625,7 @@ public static class IsometricDemoSceneSetup
         image.color = new Color(0.12f, 0.14f, 0.18f, 0.88f);
 
         var btn = go.AddComponent<Button>();
+        btn.navigation = new Navigation { mode = Navigation.Mode.None };
         AddButtonLabel(go.transform, label, 26);
 
         return btn;
@@ -678,6 +682,7 @@ public static class IsometricDemoSceneSetup
         slider.maxValue = 1f;
         slider.wholeNumbers = false;
         slider.value = 0.5f;
+        slider.navigation = new Navigation { mode = Navigation.Mode.None };
 
         return slider;
     }

@@ -18,6 +18,8 @@ public sealed class CameraZoomUI : MonoBehaviour
 
         if (zoomSlider == null)
             zoomSlider = GetComponentInChildren<Slider>();
+
+        DisableKeyboardNavigationOnZoomControls();
     }
 
     private void OnEnable()
@@ -87,5 +89,17 @@ public sealed class CameraZoomUI : MonoBehaviour
     {
         if (cameraController == null)
             cameraController = FindObjectOfType<StardewStyleCamera2D>();
+    }
+
+    /// <summary>
+    /// Prevents A/D (Horizontal axis) from driving the zoom slider via UI navigation.
+    /// </summary>
+    private void DisableKeyboardNavigationOnZoomControls()
+    {
+        if (zoomSlider != null)
+            zoomSlider.navigation = new Navigation { mode = Navigation.Mode.None };
+
+        foreach (var selectable in GetComponentsInChildren<Selectable>(true))
+            selectable.navigation = new Navigation { mode = Navigation.Mode.None };
     }
 }
